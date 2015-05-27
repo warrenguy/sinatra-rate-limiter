@@ -19,6 +19,7 @@ module Sinatra
         }.include?(false)
 
         if error_locals = limits_exceeded?(limits, limit_name)
+          rate_limit_headers(limits, limit_name)
           response.headers['Retry-After'] = error_locals[:try_again] if settings.rate_limiter_send_headers
           halt settings.rate_limiter_error_code, error_response(error_locals)
         end
@@ -27,16 +28,7 @@ module Sinatra
                     settings.rate_limiter_redis_expires,
                     request.env['REQUEST_URI'])
 
-        if settings.rate_limiter_send_headers
-          header_prefix = 'X-Rate-Limit' + (limit_name.eql?('default') ? '' : '-' + limit_name)
-          limit_no = 0 if limits.length > 1
-          limits.each do |limit|
-            limit_no = limit_no + 1 if limit_no
-            response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Limit']     = limit[:requests]
-            response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Remaining'] = limit_remaining(limit, limit_name)
-            response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Reset']     = limit_reset(limit, limit_name)
-          end
-        end
+        rate_limit_headers(limits, limit_name) if settings.rate_limiter_send_headers
       end
 
       private
@@ -70,6 +62,17 @@ module Sinatra
         if exceeded
           try_again = limit_reset(exceeded, limit_name)
           return exceeded.merge({try_again: try_again.to_i})
+        end
+      end
+
+      def rate_limit_headers(limits, limit_name)
+        header_prefix = 'X-Rate-Limit' + (limit_name.eql?('default') ? '' : '-' + limit_name)
+        limit_no = 0 if limits.length > 1
+        limits.each do |limit|
+          limit_no = limit_no + 1 if limit_no
+          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Limit']     = limit[:requests]
+          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Remaining'] = limit_remaining(limit, limit_name)
+          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Reset']     = limit_reset(limit, limit_name)
         end
       end
 
