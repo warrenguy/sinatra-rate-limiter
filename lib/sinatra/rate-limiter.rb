@@ -29,10 +29,12 @@ module Sinatra
 
         if settings.rate_limiter_send_headers
           header_prefix = 'X-Rate-Limit' + (limit_name.eql?('default') ? '' : '-' + limit_name)
+          limit_no = 0 if limits.length > 1
           limits.each do |limit|
-            response.headers[header_prefix + '-Limit']     = "#{limit[:requests]}/#{limit[:seconds]}"
-            response.headers[header_prefix + '-Remaining'] = limit_remaining(limit, limit_name)
-            response.headers[header_prefix + '-Reset']     = limit_reset(limit, limit_name)
+            limit_no = limit_no + 1 if limit_no
+            response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Limit']     = limit[:requests]
+            response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Remaining'] = limit_remaining(limit, limit_name)
+            response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Reset']     = limit_reset(limit, limit_name)
           end
         end
       end
