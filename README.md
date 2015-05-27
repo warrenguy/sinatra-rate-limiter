@@ -47,7 +47,7 @@ routes and stricter individual rate limits to two particular routes:
 
   ```ruby
   before do
-    rate_limit [{requests: 1000, seconds: 15*60}, {requests: 100, seconds: 60*60}]
+    rate_limit [{requests: 1000, seconds: 15*60}]
 
     "now you see me"
   end
@@ -75,7 +75,8 @@ once with the same (or no) name, it will be double counted.
 All configuration is optional. If no default limits are specified here,
 you must specify limits with each call of `rate_limit`
 
- * Defaults
+### Defaults
+
    ```ruby
    set :rate_limiter_default_limits,   []
    set :rate_limiter_environments,     [:production]
