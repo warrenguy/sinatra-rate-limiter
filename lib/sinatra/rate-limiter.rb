@@ -66,7 +66,7 @@ module Sinatra
         exceeded = limits.select {|limit| limit_remaining(limit, limit_name) < 1}.sort_by{|e| e[:seconds]}.last
 
         if exceeded
-          try_again = exceeded[:seconds] - (Time.now.to_f - limit_history(limit_name, exceeded[:seconds]).first)
+          try_again = limit_reset(exceeded, limit_name)
           return exceeded.merge({try_again: try_again.to_i})
         end
       end
