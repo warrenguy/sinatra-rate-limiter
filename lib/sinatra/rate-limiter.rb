@@ -11,7 +11,12 @@ module Sinatra
         return nil unless settings.rate_limiter
 
         limit_name = 'default' if limit_name.to_s.empty?
-        raise ArgumentError unless limit_name.is_a? String
+        raise ArgumentError, 'Limit name must be a string' unless limit_name.is_a? String
+
+        raise ArgumentError, 'No default or explicit limits provided' unless limits.length > 0
+        raise ArgumentError, 'Invalid limit specification' if limits.map{ |limit|
+          limit.length.eql?(2) and limit[:requests].is_a?(Integer) and limit[:seconds].is_a?(Integer)
+        }.include?(false)
 
         if (settings.rate_limiter_environments.include?(settings.environment) and
             error_locals = limits_exceeded?(limits, limit_name))
@@ -92,14 +97,14 @@ module Sinatra
       app.helpers RateLimiter::Helpers
 
       app.set :rate_limiter,                  false
-      app.set :rate_limiter_default_limits,   [] # 10 requests per minute: [{requests: 10, seconds: 60}] 
+      app.set :rate_limiter_default_limits,   []  # 10 requests per minute: [{requests: 10, seconds: 60}] 
       app.set :rate_limiter_environments,     [:production]
       app.set :rate_limiter_error_code,       429 # http://tools.ietf.org/html/rfc6585
       app.set :rate_limiter_error_template,   nil # locals: requests, seconds, try_again
       app.set :rate_limiter_send_headers,     true
       app.set :rate_limiter_custom_user_id,   nil # Proc.new { Proc.new{ |request| request.ip } }
-      # must be wrapped with another Proc because Sinatra
-      # evaluates Procs in settings when reading them.
+                                                  # must be wrapped with another Proc because Sinatra
+                                                  # evaluates Procs in settings when reading them.
       app.set :rate_limiter_redis_conn,       Redis.new
       app.set :rate_limiter_redis_namespace,  'rate_limit'
       app.set :rate_limiter_redis_expires,    24*60*60
