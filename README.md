@@ -36,7 +36,7 @@ requests per hour:
 
   ```ruby
   get '/rate-limited' do
-    rate_limit [{requests: 10, seconds: 60}, {requests: 100, seconds: 60*60}]
+    rate_limit 'default', [{requests: 10, seconds: 60}, {requests: 100, seconds: 60*60}]
 
     "now you see me"
   end
@@ -46,10 +46,9 @@ The following will apply an unnamed limit of 1000 requests per hour to all
 routes and stricter individual rate limits to two particular routes:
 
   ```ruby
+  set :rate_limiter_default_limits, [{requests: 1000, seconds: 60*60}]
   before do
-    rate_limit [{requests: 1000, seconds: 15*60}]
-
-    "now you see me"
+    rate_limit
   end
 
   get '/' do
