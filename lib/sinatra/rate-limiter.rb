@@ -8,7 +8,7 @@ module Sinatra
     module Helpers
 
       def rate_limit(limit_name = nil, limits = settings.rate_limiter_default_limits)
-        return nil unless settings.rate_limiter
+        return unless settings.rate_limiter and settings.rate_limiter_environments.include?(settings.environment)
 
         limit_name = 'default' if limit_name.to_s.empty?
         raise ArgumentError, 'Limit name must be a string' unless limit_name.is_a? String
@@ -18,9 +18,7 @@ module Sinatra
           limit.length.eql?(2) and limit[:requests].is_a?(Integer) and limit[:seconds].is_a?(Integer)
         }.include?(false)
 
-        if (settings.rate_limiter_environments.include?(settings.environment) and
-            error_locals = limits_exceeded?(limits, limit_name))
-
+        if error_locals = limits_exceeded?(limits, limit_name)
           response.headers['Retry-After'] = error_locals[:try_again] if settings.rate_limiter_send_headers
           halt settings.rate_limiter_error_code, error_response(error_locals)
         end
@@ -37,7 +35,6 @@ module Sinatra
             response.headers[header_prefix + '-Reset']     = limit_reset(limit, limit_name)
           end
         end
-
       end
 
       private
