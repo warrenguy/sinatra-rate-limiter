@@ -39,9 +39,8 @@ module Sinatra
           raise ArgumentError, 'Wrong number of Fixnum parameters supplied.'
         end
 
-        limits = args.each_slice(2).to_a.map{|a| {requests: a[0], seconds: a[1]}}
-
-        return [limit_name, limits]
+        return [limit_name,
+                args.each_slice(2).map{|a| {requests: a[0], seconds: a[1]}}]
       end
 
       def redis
