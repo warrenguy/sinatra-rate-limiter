@@ -102,6 +102,13 @@ module Sinatra
         end
       end
 
+      def get_min_time_prefix(limits)
+        now    = Time.now.to_f
+        oldest = Time.now.to_f - limits.sort_by{|l| -l[:seconds]}.first[:seconds]
+
+        return now.to_s[0..((now/oldest).to_s.split(/^1\.|[1-9]+/)[1].length)].to_i.to_s
+      end
+
     end
 
     def self.registered(app)
@@ -129,6 +136,7 @@ module Sinatra
     def initialize(limit_name, limits)
       @limit_name    = limit_name
       @limits        = limits
+      @time_prefix   = get_min_time_prefix(@limits)
     end
 
     include Sinatra::RateLimiter::Helpers
@@ -142,7 +150,7 @@ module Sinatra
         @history
       else
         @history = redis.
-          keys("#{[namespace,user_identifier,@limit_name].join('/')}/*").
+          keys("#{[namespace,user_identifier,@limit_name].join('/')}/#{@time_prefix}*").
           map{|k| k.split('/')[3].to_f}
       end
     end
