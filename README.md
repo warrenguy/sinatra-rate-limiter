@@ -23,8 +23,26 @@ below for examples demonstrating this.
  * Require and enable it in your app after including Sinatra
 
    ```ruby
+   require 'sinatra'
    require 'sinatra/rate-limiter'
+
    enable :rate_limiter
+
+   ...
+   ```
+
+ * Modular applications must explicitly register the extension, e.g.
+
+   ```ruby
+   require 'sinatra/base'
+   require 'sinatra/rate-limiter'
+
+   class ModularApp < Sinatra::Base
+     register Sinatra::RateLimiter
+     enable :rate_limiter
+
+     ...
+   end
    ```
 
 ## Usage

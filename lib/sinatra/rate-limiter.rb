@@ -170,4 +170,5 @@ module Sinatra
     end
   end
 
+  register RateLimiter
 end
