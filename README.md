@@ -7,9 +7,9 @@ request that the rate limiter sees logs a new item in the redis store. If
 more than the allowable number of requests have been made in the given time
 then no new item is logged and the request is aborted. The items stored in
 redis include a bucket name and timestamp in their key name. This allows
-multiple limit "buckets" to be used and for variable rate limits to be
-applied to different requests using the same bucket. See the _Usage_ section
-below for examples demonstrating this.
+multiple "buckets" to be used and for variable rate limits to be applied to
+different requests using the same bucket. See the _Usage_ section below for
+examples demonstrating this.
 
 ## Installing
 
@@ -55,10 +55,9 @@ zero to infinite parameters, with the syntax:
   rate_limit [String], [[<Fixnum>, <Fixnum>], [<Fixnum>, <Fixnum>], ...]
   ```
 
-The `String` optionally defines a name for this rate limiter, allowing you
-to have multiple rate limits within your app. The following pairs of
+The `String` optionally defines a named bucket. The following pairs of
 `Fixnum`s define `[requests, seconds]`, allowing you to specify how many
-requests per seconds this rate limiter allows.
+requests per seconds are allowed for this route/path.
 
 The following route will be limited to 10 requests per minute and 100
 requests per hour:
@@ -71,8 +70,9 @@ requests per hour:
   end
   ```
 
-The following will apply an unnamed limit of 1000 requests per hour to all
-routes and stricter individual rate limits to two particular routes:
+The following will apply a limit of 1000 requests per hour using the default
+bucket to all routes and stricter individual rate limits with additional
+buckets assigned to the remaining routes.
 
   ```ruby
   set :rate_limiter_default_limits, [1000, 60*60]
@@ -81,7 +81,7 @@ routes and stricter individual rate limits to two particular routes:
   end
 
   get '/' do
-    "this route has the global limit applied"
+    "this route has only the global limit applied"
   end
 
   get '/rate-limit-1/example-1' do
@@ -89,7 +89,7 @@ routes and stricter individual rate limits to two particular routes:
                              10, 60 
 
     "this route is rate limited to 2 requests per 5 seconds and 10 per 60
-     seconds"
+     seconds in addition to the global limit of 1000 per hour"
   end
 
   get '/rate-limit-1/example-2' do
@@ -107,8 +107,9 @@ routes and stricter individual rate limits to two particular routes:
 
 N.B. in the last example, be aware that the more specific rate limits do not
 override any rate limit already defined during route processing, and the
-global rate limit will apply additionally. If you call `rate_limit` more
-than once with the same (or no) name, it will be double counted.
+first rate limit specified in `before` will apply additionally. If you call
+`rate_limit` more than once with the same (or no) bucket name, the request
+will be double counted in that bucket.
 
 ## Configuration
 
@@ -130,3 +131,13 @@ you must specify limits with each call of `rate_limit`
    ```
 
 TODO: document each setting here explicitly
+
+## License
+
+MIT license. See [LICENSE](https://github.com/warrenguy/sinatra-rate-limiter/blob/master/LICENSE).
+
+## Author
+
+Warren Guy <warren@guy.net.au>
+
+https://warrenguy.me
