@@ -12,8 +12,12 @@ module Sinatra
 
         limit_name, limits = parse_args(args)
 
-        if error_locals = limits_exceeded?(limits, limit_name)
-          rate_limit_headers(limits, limit_name)
+        limiter = RateLimit.new(limit_name, limits)
+        limiter.settings = settings
+        limiter.request  = request
+
+        if error_locals = limits_exceeded?(limits, limiter)
+          rate_limit_headers(limits, limit_name, limiter)
           response.headers['Retry-After'] = error_locals[:try_again] if settings.rate_limiter_send_headers
           halt settings.rate_limiter_error_code, error_response(error_locals)
         end
@@ -22,7 +26,7 @@ module Sinatra
                     settings.rate_limiter_redis_expires,
                     request.env['REQUEST_URI'])
 
-        rate_limit_headers(limits, limit_name) if settings.rate_limiter_send_headers
+        rate_limit_headers(limits, limit_name, limiter) if settings.rate_limiter_send_headers
       end
 
       private
@@ -53,38 +57,31 @@ module Sinatra
         settings.rate_limiter_redis_namespace
       end
 
-      def limit_history(limit_name, seconds=0)
-        redis.
-          keys("#{[namespace,user_identifier,limit_name].join('/')}/*").
-          map{|k| k.split('/')[3].to_f}.
-          select{|t| seconds.eql?(0) ? true : t > (Time.now.to_f - seconds)}
+      def limit_remaining(limit, limiter)
+        limit[:requests] - limiter.history(limit[:seconds]).length
       end
 
-      def limit_remaining(limit, limit_name)
-        limit[:requests] - limit_history(limit_name, limit[:seconds]).length
+      def limit_reset(limit, limiter)
+        limit[:seconds] - (Time.now.to_f - limiter.history(limit[:seconds]).first.to_f).to_i
       end
 
-      def limit_reset(limit, limit_name)
-        limit[:seconds] - (Time.now.to_f - limit_history(limit_name, limit[:seconds]).first).to_i
-      end
-
-      def limits_exceeded?(limits, limit_name)
-        exceeded = limits.select {|limit| limit_remaining(limit, limit_name) < 1}.sort_by{|e| e[:seconds]}.last
+      def limits_exceeded?(limits, limiter)
+        exceeded = limits.select {|limit| limit_remaining(limit, limiter) < 1}.sort_by{|e| e[:seconds]}.last
 
         if exceeded
-          try_again = limit_reset(exceeded, limit_name)
+          try_again = limit_reset(exceeded, limiter)
           return exceeded.merge({try_again: try_again.to_i})
         end
       end
 
-      def rate_limit_headers(limits, limit_name)
+      def rate_limit_headers(limits, limit_name, limiter)
         header_prefix = 'X-Rate-Limit' + (limit_name.eql?('default') ? '' : '-' + limit_name)
         limit_no = 0 if limits.length > 1
         limits.each do |limit|
           limit_no = limit_no + 1 if limit_no
           response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Limit']     = limit[:requests]
-          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Remaining'] = limit_remaining(limit, limit_name)
-          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Reset']     = limit_reset(limit, limit_name)
+          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Remaining'] = limit_remaining(limit, limiter)
+          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Reset']     = limit_reset(limit, limiter)
         end
       end
 
@@ -124,6 +121,45 @@ module Sinatra
       app.set :rate_limiter_redis_expires,    24*60*60
     end
 
+  end
+
+  class RateLimit
+    attr_reader :history
+
+    def initialize(limit_name, limits)
+      @limit_name    = limit_name
+      @limits        = limits
+    end
+
+    include Sinatra::RateLimiter::Helpers
+
+    def history(seconds=0)
+      redis_history.select{|t| seconds.eql?(0) ? true : t > (Time.now.to_f - seconds)}
+    end
+
+    def redis_history
+      if @history
+        @history
+      else
+        @history = redis.
+          keys("#{[namespace,user_identifier,@limit_name].join('/')}/*").
+          map{|k| k.split('/')[3].to_f}
+      end
+    end
+
+    def settings=(settings)
+      @settings = settings
+    end
+    def settings
+      @settings
+    end
+
+    def request=(request)
+      @request = request
+    end
+    def request
+      @request
+    end
   end
 
 end
