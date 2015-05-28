@@ -24,7 +24,12 @@ Use `rate_limit` in the pipeline of any route (i.e. in the route itself, or
 in a `before` filter, or in a Padrino controller, etc. `rate_limit` takes
 zero to infinite parameters, with the syntax:
 
-  ```rate_limit [String], [<Fixnum>, <Fixnum>], [<Fixnum>, <Fixnum>], ...```
+  ```rate_limit [String], [[<Fixnum>, <Fixnum>], [<Fixnum>, <Fixnum>], ...]```
+
+The `String` optionally defines a name for this rate limiter, allowing you
+to have multiple rate limits within your app. The following pairs of
+`Fixnum`s define `[requests, seconds]`, allowing you to specify how many
+requests per seconds this rate limiter allows.
 
 The following route will be limited to 10 requests per minute and 100
 requests per hour:
