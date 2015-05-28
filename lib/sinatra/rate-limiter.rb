@@ -37,6 +37,8 @@ module Sinatra
           raise ArgumentError, 'Non-Fixnum parameters supplied. All parameters must be Fixnum except the first which may be a String.'
         elsif ((args.map{|a| a.class}.size % 2) != 0)
           raise ArgumentError, 'Wrong number of Fixnum parameters supplied.'
+        elsif !(limit_name =~ /^[a-zA-Z0-9\-]*$/)
+          raise ArgumentError, 'Limit name must be a String containing only a-z, A-Z, 0-9, and -.'
         end
 
         return [limit_name,
