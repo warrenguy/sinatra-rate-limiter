@@ -125,7 +125,7 @@ module Sinatra
                                                   # evaluates Procs in settings when reading them.
       app.set :rate_limiter_redis_conn,       Redis.new
       app.set :rate_limiter_redis_namespace,  'rate_limit'
-      app.set :rate_limiter_redis_expires,    24*60*60
+      app.set :rate_limiter_redis_expires,    24*60*60 # This must be larger than longest limit time period
     end
 
   end

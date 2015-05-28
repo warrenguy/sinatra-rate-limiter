@@ -2,6 +2,15 @@
 
 A customisable redis backed rate limiter for Sinatra applications.
 
+This rate limiter extension operates on a leaky bucket principle. Each
+request that the rate limiter sees logs a new item in the redis store. If
+more than the allowable number of requests have been made in the given time
+then no new item is logged and the request is aborted. The items stored in
+redis include a bucket name and timestamp in their key name. This allows
+multiple limit "buckets" to be used and for variable rate limits to be
+applied to different requests using the same bucket. See the _Usage_ section
+below for examples demonstrating this.
+
 ## Installing
 
  * Add the gem to your Gemfile
@@ -24,7 +33,9 @@ Use `rate_limit` in the pipeline of any route (i.e. in the route itself, or
 in a `before` filter, or in a Padrino controller, etc. `rate_limit` takes
 zero to infinite parameters, with the syntax:
 
-  ```rate_limit [String], [[<Fixnum>, <Fixnum>], [<Fixnum>, <Fixnum>], ...]```
+  ```
+  rate_limit [String], [[<Fixnum>, <Fixnum>], [<Fixnum>, <Fixnum>], ...]
+  ```
 
 The `String` optionally defines a name for this rate limiter, allowing you
 to have multiple rate limits within your app. The following pairs of
@@ -55,12 +66,19 @@ routes and stricter individual rate limits to two particular routes:
     "this route has the global limit applied"
   end
 
-  get '/rate-limit-1' do
+  get '/rate-limit-1/example-1' do
     rate_limit 'ratelimit1', 2,  5,
                              10, 60 
 
-    "this route is rate limited to 2 requests per 5 seconds and 10 per 60 seconds"
+    "this route is rate limited to 2 requests per 5 seconds and 10 per 60
+     seconds"
   end
+
+  get '/rate-limit-1/example-2' do
+    rate_limit 'ratelimit1', 60, 60
+
+    "this route is rate limited to 60 requests per minute using the same
+     bucket as '/rate-limit-1'. "
 
   get '/rate-limit-2' do
     rate_limit 'ratelimit2', 1, 10
@@ -71,8 +89,8 @@ routes and stricter individual rate limits to two particular routes:
 
 N.B. in the last example, be aware that the more specific rate limits do not
 override any rate limit already defined during route processing, and the
-global rate limit will apply additionally. If you call `rate_limit` more than
-once with the same (or no) name, it will be double counted.
+global rate limit will apply additionally. If you call `rate_limit` more
+than once with the same (or no) name, it will be double counted.
 
 ## Configuration
 
