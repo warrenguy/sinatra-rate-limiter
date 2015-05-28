@@ -58,10 +58,14 @@ routes and stricter individual rate limits to two particular routes:
   get '/rate-limit-1' do
     rate_limit 'ratelimit1', 2,  5,
                              10, 60 
+
+    "this route is rate limited to 2 requests per 5 seconds and 10 per 60 seconds"
   end
 
   get '/rate-limit-2' do
     rate_limit 'ratelimit2', 1, 10
+
+    "this route is rate limited to 1 request per 10 seconds"
   end
   ```
 
