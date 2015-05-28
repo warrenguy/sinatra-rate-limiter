@@ -7,16 +7,10 @@ module Sinatra
 
     module Helpers
 
-      def rate_limit(limit_name = nil, limits = settings.rate_limiter_default_limits)
+      def rate_limit(*args)
         return unless settings.rate_limiter and settings.rate_limiter_environments.include?(settings.environment)
 
-        limit_name = 'default' if limit_name.to_s.empty?
-        raise ArgumentError, 'Limit name must be a string' unless limit_name.is_a? String
-
-        raise ArgumentError, 'No default or explicit limits provided' unless limits.length > 0
-        raise ArgumentError, 'Invalid limit specification' if limits.map{ |limit|
-          limit.length.eql?(2) and limit[:requests].is_a?(Integer) and limit[:seconds].is_a?(Integer)
-        }.include?(false)
+        limit_name, limits = parse_args(args)
 
         if error_locals = limits_exceeded?(limits, limit_name)
           rate_limit_headers(limits, limit_name)
@@ -32,6 +26,23 @@ module Sinatra
       end
 
       private
+
+      def parse_args(args)
+        limit_name = args.map{|a| a.class}.first.eql?(String) ? args.shift : 'default'
+        args = settings.rate_limiter_default_limits if args.size < 1
+
+        if (args.size < 1)
+          raise ArgumentError, 'No explicit or default limits values provided.'
+        elsif (args.map{|a| a.class}.select{|a| a != Fixnum}.count > 0)
+          raise ArgumentError, 'Non-Fixnum parameters supplied. All parameters must be Fixnum except the first which may be a String.'
+        elsif ((args.map{|a| a.class}.size % 2) != 0)
+          raise ArgumentError, 'Wrong number of Fixnum parameters supplied.'
+        end
+
+        limits = args.each_slice(2).to_a.map{|a| {requests: a[0], seconds: a[1]}}
+
+        return [limit_name, limits]
+      end
 
       def redis
         settings.rate_limiter_redis_conn

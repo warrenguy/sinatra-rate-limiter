@@ -22,21 +22,16 @@ A customisable redis backed rate limiter for Sinatra applications.
 
 Use `rate_limit` in the pipeline of any route (i.e. in the route itself, or
 in a `before` filter, or in a Padrino controller, etc. `rate_limit` takes
-two parameters:
+zero to infinite parameters, with the syntax:
 
- * `limit_name`: a name for the rate limiter, if you wish to apply different
-   rate limits for different routes in your app. Required if also specifying
-   limits, although it can be simply `nil` or `''` if you don't feel creative.
- * `limits`: an array of hashes in format: [{requests: 10, seconds: 60}, ...]
-   This is optional if the `rate_limiter_default_limits` configuration
-   parameter is set.
+  ```rate_limit [String], [<Fixnum>, <Fixnum>], [<Fixnum>, <Fixnum>], ...```
 
 The following route will be limited to 10 requests per minute and 100
 requests per hour:
 
   ```ruby
   get '/rate-limited' do
-    rate_limit 'default', [{requests: 10, seconds: 60}, {requests: 100, seconds: 60*60}]
+    rate_limit 'default', 10, 60, 100, 60*60
 
     "now you see me"
   end
@@ -46,7 +41,7 @@ The following will apply an unnamed limit of 1000 requests per hour to all
 routes and stricter individual rate limits to two particular routes:
 
   ```ruby
-  set :rate_limiter_default_limits, [{requests: 1000, seconds: 60*60}]
+  set :rate_limiter_default_limits, [1000, 60*60]
   before do
     rate_limit
   end
@@ -56,11 +51,12 @@ routes and stricter individual rate limits to two particular routes:
   end
 
   get '/rate-limit-1' do
-    rate_limit 'ratelimit1', [{requests: 2, seconds: 5}]
+    rate_limit 'ratelimit1', 2,  5,
+                             10, 60 
   end
 
   get '/rate-limit-2' do
-    rate_limit 'ratelimit2', [{requests: 1, seconds: 10}]
+    rate_limit 'ratelimit2', 1, 10
   end
   ```
 
