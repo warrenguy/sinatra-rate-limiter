@@ -8,8 +8,7 @@ more than the allowable number of requests have been made in the given time
 then no new item is logged and the request is aborted. The items stored in
 redis include a bucket name and timestamp in their key name. This allows
 multiple "buckets" to be used and for variable rate limits to be applied to
-different requests using the same bucket. See the _Usage_ section below for
-examples demonstrating this.
+different requests using the same bucket.
 
 ## Installing
 
@@ -52,22 +51,97 @@ in a `before` filter, or in a Padrino controller, etc. `rate_limit` takes
 zero to infinite parameters, with the syntax:
 
   ```
-  rate_limit([String],  [Hash], [[<Fixnum>, <Fixnum>], [<Fixnum>, <Fixnum>], ...])
+  rate_limit [BucketName], [[<Requests>, <Seconds>], ...], [[<Key>: <Value>], ...]
   ```
 
-The `String` optionally defines a named bucket. The `Hash` optionally
-defines overrides of the extensions' settings, where the key of each option
-is the name of the extension-wide setting with the `rate_limiter` prefix
-removed, e.g.:
-
-   ```
-   rate_limit({send_headers: false}, ...)
-   ```
-
-
- The following pairs of
+The `String` optionally defines a named bucket. The following pairs of
 `Fixnum`s define `[requests, seconds]`, allowing you to specify how many
-requests per seconds are allowed for this route/path.
+requests per seconds are allowed for this route/path. Finally overrides for
+the globally defined default options can be provided.
+
+See the _Examples_ section below for usage examples.
+
+## Configuration
+
+All configuration is optional. If no default limits are specified here,
+you must specify limits with each call of `rate_limit`
+
+### Defaults
+
+   ```ruby
+   set :rate_limiter_environments,     [:production]
+   set :rate_limiter_default_limits,   [10, 20]
+   set :rate_limiter_redis_conn,       Redis.new
+   set :rate_limiter_redis_namespace,  'rate_limit'
+   set :rate_limiter_redis_expires,    24*60*60
+
+   set :rate_limiter_default_options, {
+     error_code:     429,
+     error_template: nil,
+     send_headers:   true,
+     identifier:     Proc.new{ |request| request.ip }
+   }
+   ```
+
+#### `rate_limiter_environments` (Array)
+
+An Array of Rack environments to enable the rate limiter for.
+
+#### `rate_limiter_default_limits` (Array)
+
+Default limit parameters.
+
+#### `rate_limiter_redis_conn` (Redis)
+
+Redis connection definition (e.g. global variable pointing at your already
+defined Redis connection, or a ConnectionPool, etc).
+
+#### `rate_limiter_redis_namespace` (String)
+
+The Redis namespace to use. All keys stored in the Redis store will be
+prefixed with this string plus a forward-slash (`/`).
+
+#### `rate_limiter_redis_expires` (Integer)
+
+How long keys live in the Redis store for. This must be longer than any
+limiter's longest 'seconds' parameter.
+
+#### `rate_limiter_default_options` (Hash)
+
+Default options provided to each call of `rate_limit`
+
+##### `error_code` (Integer)
+
+The HTTP error code to send to the client when a rate limit is reached.
+Defaults to `429` per [RFC 6585](http://tools.ietf.org/html/rfc6585) but
+you may have your own reasons for wanting to use a different code (like 400
+or 503).
+
+##### `error_template` (String)
+
+Defines a template to render when a rate limit is reached (e.g. a nice error
+page or a machine friendly JSON response). Three local variables are
+provided (all Integers):
+
+ * `requests`: The number of requests that triggered the rate limit.
+ * `seconds`: The rate limit period.
+ * `try_again`: In how many seconds the client should try again.
+
+##### `send_headers` (Boolean)
+
+Whether or not to send `X-RateLimit-` headers to the client with each
+request. A `Retry-After` header is currently always sent when a rate
+limit is reached regardless of this setting.
+
+##### `identifier` (Proc)
+
+A `Proc` taking exactly one parameter (`request`) which returns a String
+identifying the client for the purposes of rate limiting. Defaults to the
+clients IP address (from `request.ip`) but you could use the value of a 
+cookie, a session ID, username, or anything else accessible from Sinatra's
+`request` object.
+
+## Examples
 
 The following route will be limited to 10 requests per minute and 100
 requests per hour:
@@ -82,11 +156,14 @@ requests per hour:
 
 The following will apply a limit of 1000 requests per hour using the default
 bucket to all routes and stricter individual rate limits with additional
-buckets assigned to the remaining routes.
+buckets assigned to the remaining routes. It identifiers the client by the
+value of the cookie `userid` instead of by IP address.
 
   ```ruby
-  set :rate_limiter_default_limits, [1000, 60*60]
-  set :rate_limiter_send_headers, true
+  set :rate_limiter_default_limits,  [1000, 60*60]
+  set :rate_limiter_default_options, send_headers: true,
+                                     identifier: Proc.new{|request| request.cookies['userid']}
+
   before do
     rate_limit
   end
@@ -97,7 +174,7 @@ buckets assigned to the remaining routes.
 
   get '/rate-limit-1/example-1' do
     rate_limit 'ratelimit1', 2,  5,
-                             10, 60 
+                             10, 60
 
     "this route is rate limited to 2 requests per 5 seconds and 10 per 60
      seconds in addition to the global limit of 1000 per hour"
@@ -110,7 +187,7 @@ buckets assigned to the remaining routes.
      bucket as '/rate-limit-1'. "
 
   get '/rate-limit-2' do
-    rate_limit('ratelimit2', {send_headers: false}, 1, 10)
+    rate_limit 'ratelimit2', 1, 10, send_headers: false
 
     "this route is rate limited to 1 request per 10 seconds, and won't send
      any headers"
@@ -122,27 +199,6 @@ override any rate limit already defined during route processing, and the
 first rate limit specified in `before` will apply additionally. If you call
 `rate_limit` more than once with the same (or no) bucket name, the request
 will be double counted in that bucket.
-
-## Configuration
-
-All configuration is optional. If no default limits are specified here,
-you must specify limits with each call of `rate_limit`
-
-### Defaults
-
-   ```ruby
-   set :rate_limiter_default_limits,   []
-   set :rate_limiter_environments,     [:production]
-   set :rate_limiter_error_code,       429
-   set :rate_limiter_error_template,   nil
-   set :rate_limiter_send_headers,     true
-   set :rate_limiter_custom_user_id,   nil
-   set :rate_limiter_redis_conn,       Redis.new
-   set :rate_limiter_redis_namespace,  'rate_limit'
-   set :rate_limiter_redis_expires,    24*60*60
-   ```
-
-TODO: document each setting here explicitly
 
 ## License
 
