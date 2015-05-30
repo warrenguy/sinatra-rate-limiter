@@ -162,7 +162,8 @@ module Sinatra
     end
 
     def options=(options)
-      @options = OpenStruct.new(settings.rate_limiter_default_options.merge(options))
+      options = settings.rate_limiter_default_options.merge(options)
+      @options = Struct.new(*options.keys).new(*options.values)
     end
     def options
       @options
