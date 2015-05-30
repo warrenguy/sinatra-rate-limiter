@@ -45,7 +45,7 @@ module Sinatra
           raise ArgumentError, 'Wrong number of Fixnum parameters supplied.'
         elsif !(bucket =~ /^[a-zA-Z0-9\-]*$/)
           raise ArgumentError, 'Limit name must be a String containing only a-z, A-Z, 0-9, and -.'
-        elsif (omap = (options.keys.map{|o| settings.rate_limiter_default_options.keys.include?(o)}).include?(false))
+        elsif (omap = (options.keys.map{|o| settings.rate_limiter_default_options.keys.include?(o)})).include?(false)
           raise ArgumentError, "Invalid option '#{options.keys[omap.index(false)]}'."
         end
 
