@@ -52,10 +52,20 @@ in a `before` filter, or in a Padrino controller, etc. `rate_limit` takes
 zero to infinite parameters, with the syntax:
 
   ```
-  rate_limit [String], [[<Fixnum>, <Fixnum>], [<Fixnum>, <Fixnum>], ...]
+  rate_limit([String],  [Hash], [[<Fixnum>, <Fixnum>], [<Fixnum>, <Fixnum>], ...])
   ```
 
-The `String` optionally defines a named bucket. The following pairs of
+The `String` optionally defines a named bucket. The `Hash` optionally
+defines overrides of the extensions' settings, where the key of each option
+is the name of the extension-wide setting with the `rate_limiter` prefix
+removed, e.g.:
+
+   ```
+   rate_limit({send_headers: false}, ...)
+   ```
+
+
+ The following pairs of
 `Fixnum`s define `[requests, seconds]`, allowing you to specify how many
 requests per seconds are allowed for this route/path.
 
@@ -76,6 +86,7 @@ buckets assigned to the remaining routes.
 
   ```ruby
   set :rate_limiter_default_limits, [1000, 60*60]
+  set :rate_limiter_send_headers, true
   before do
     rate_limit
   end
@@ -99,9 +110,10 @@ buckets assigned to the remaining routes.
      bucket as '/rate-limit-1'. "
 
   get '/rate-limit-2' do
-    rate_limit 'ratelimit2', 1, 10
+    rate_limit('ratelimit2', {send_headers: false}, 1, 10)
 
-    "this route is rate limited to 1 request per 10 seconds"
+    "this route is rate limited to 1 request per 10 seconds, and won't send
+     any headers"
   end
   ```
 

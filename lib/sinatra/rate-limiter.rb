@@ -10,51 +10,54 @@ module Sinatra
       def rate_limit(*args)
         return unless settings.rate_limiter and settings.rate_limiter_environments.include?(settings.environment)
 
-        limit_name, limits = parse_args(args)
+        bucket, override, limits = parse_args(args)
 
-        limiter = RateLimit.new(limit_name, limits)
-        limiter.settings = settings
-        limiter.request  = request
+        limiter = RateLimit.new(bucket, limits)
+        limiter.settings  = settings
+        limiter.request   = request
+        limiter.overrides = override
 
         if error_locals = limits_exceeded?(limits, limiter)
-          rate_limit_headers(limits, limit_name, limiter)
-          response.headers['Retry-After'] = error_locals[:try_again] if settings.rate_limiter_send_headers
-          halt settings.rate_limiter_error_code, error_response(error_locals)
+          rate_limit_headers(limits, bucket, limiter)
+          response.headers['Retry-After'] = error_locals[:try_again] if limiter.instance_settings.rate_limiter_send_headers
+          halt limiter.instance_settings.rate_limiter_error_code, error_response(error_locals)
         end
 
-        redis.setex([namespace,user_identifier,limit_name,Time.now.to_f.to_s].join('/'),
-                    settings.rate_limiter_redis_expires,
+        redis(limiter).setex([namespace(limiter),user_identifier(limiter),bucket,Time.now.to_f.to_s].join('/'),
+                    limiter.instance_settings.rate_limiter_redis_expires,
                     request.env['REQUEST_URI'])
 
-        rate_limit_headers(limits, limit_name, limiter) if settings.rate_limiter_send_headers
+        rate_limit_headers(limits, bucket, limiter) if limiter.instance_settings.rate_limiter_send_headers
       end
 
       private
 
       def parse_args(args)
-        limit_name = args.map{|a| a.class}.first.eql?(String) ? args.shift : 'default'
-        args = settings.rate_limiter_default_limits if args.size < 1
+        bucket    = (args.first.class == String) ? args.shift : 'default'
+        overrides = (args.first.class == Hash)   ? args.shift : {}
+        limits    = (args.size < 1) ? settings.rate_limiter_default_limits : args
 
-        if (args.size < 1)
+        if (limits.size < 1)
           raise ArgumentError, 'No explicit or default limits values provided.'
-        elsif (args.map{|a| a.class}.select{|a| a != Fixnum}.count > 0)
+        elsif (limits.map{|a| a.class}.select{|a| a != Fixnum}.count > 0)
           raise ArgumentError, 'Non-Fixnum parameters supplied. All parameters must be Fixnum except the first which may be a String.'
-        elsif ((args.map{|a| a.class}.size % 2) != 0)
+        elsif ((limits.map{|a| a.class}.size % 2) != 0)
           raise ArgumentError, 'Wrong number of Fixnum parameters supplied.'
-        elsif !(limit_name =~ /^[a-zA-Z0-9\-]*$/)
+        elsif !(bucket =~ /^[a-zA-Z0-9\-]*$/)
           raise ArgumentError, 'Limit name must be a String containing only a-z, A-Z, 0-9, and -.'
         end
 
-        return [limit_name,
-                args.each_slice(2).map{|a| {requests: a[0], seconds: a[1]}}]
+        return [bucket,
+                overrides,
+                limits.each_slice(2).map{|a| {requests: a[0], seconds: a[1]}}]
       end
 
-      def redis
-        settings.rate_limiter_redis_conn
+      def redis(limiter)
+        limiter.instance_settings.rate_limiter_redis_conn
       end
 
-      def namespace
-        settings.rate_limiter_redis_namespace
+      def namespace(limiter)
+        limiter.instance_settings.rate_limiter_redis_namespace
       end
 
       def limit_remaining(limit, limiter)
@@ -74,8 +77,8 @@ module Sinatra
         end
       end
 
-      def rate_limit_headers(limits, limit_name, limiter)
-        header_prefix = 'X-Rate-Limit' + (limit_name.eql?('default') ? '' : '-' + limit_name)
+      def rate_limit_headers(limits, bucket, limiter)
+        header_prefix = 'X-Rate-Limit' + (bucket.eql?('default') ? '' : '-' + bucket)
         limit_no = 0 if limits.length > 1
         limits.each do |limit|
           limit_no = limit_no + 1 if limit_no
@@ -86,17 +89,17 @@ module Sinatra
       end
 
       def error_response(locals)
-        if settings.rate_limiter_error_template
-          render settings.rate_limiter_error_template, locals: locals
+        if limiter.instance_settings.rate_limiter_error_template
+          render limiter.instance_settings.rate_limiter_error_template, locals: locals
         else
           content_type 'text/plain'
           "Rate limit exceeded (#{locals[:requests]} requests in #{locals[:seconds]} seconds). Try again in #{locals[:try_again]} seconds."
         end
       end
 
-      def user_identifier
-        if settings.rate_limiter_custom_user_id.class == Proc
-          return settings.rate_limiter_custom_user_id.call(request)
+      def user_identifier(limiter)
+        if limiter.instance_settings.rate_limiter_custom_user_id.class == Proc
+          return limiter.instance_settings.rate_limiter_custom_user_id.call(request)
         else
           return request.ip
         end
@@ -131,10 +134,10 @@ module Sinatra
   end
 
   class RateLimit
-    attr_reader :history
+    attr_reader :history, :instance_settings
 
-    def initialize(limit_name, limits)
-      @limit_name    = limit_name
+    def initialize(bucket, limits)
+      @bucket        = bucket
       @limits        = limits
       @time_prefix   = get_min_time_prefix(@limits)
     end
@@ -149,9 +152,35 @@ module Sinatra
       if @history
         @history
       else
-        @history = redis.
-          keys("#{[namespace,user_identifier,@limit_name].join('/')}/#{@time_prefix}*").
+        @history = redis(self).
+          keys("#{[namespace(self),user_identifier(self),@bucket].join('/')}/#{@time_prefix}*").
           map{|k| k.split('/')[3].to_f}
+      end
+    end
+
+    def overrides=(override)
+      @override = override
+    end
+
+    def instance_settings(override=@override)
+      if @instance_settings
+        @instance_settings
+      else
+        options = settings.methods.
+          select{|s| s =~ /^rate_limiter_[a-z_]*$/}.
+          map{|s| s.to_s.gsub(/^rate_limiter_/,'')}
+
+        if override
+          if (omap = override.keys.map{|k| options.include?(k.to_s)}).include?(false)
+            raise ArgumentError, "Invalid option '#{override.to_a[omap.index(false)][0]}' specified."
+          else
+            @instance_settings = OpenStruct.new(
+              options.map{|o| ['rate_limiter_' + o, settings.send('rate_limiter_' + o)]}.to_h.
+              merge(override.map{|k,v| ['rate_limiter_' + k.to_s, v]}.to_h))
+          end
+        else
+          @instance_settings = settings
+        end
       end
     end
 
