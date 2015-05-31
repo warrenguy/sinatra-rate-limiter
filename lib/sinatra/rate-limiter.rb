@@ -24,9 +24,7 @@ module Sinatra
           halt limiter.options.error_code, error_response(limiter, error_locals)
         end
 
-        redis.setex([namespace,limiter.user_identifier,bucket,Time.now.to_f.to_s].join('/'),
-                             settings.rate_limiter_redis_expires, nil)
-
+        limiter.log_request
         limiter.rate_limit_headers.each{|h,v| response.headers[h] = v} if limiter.options.send_headers
       end
 
@@ -54,21 +52,6 @@ module Sinatra
                 limits.each_slice(2).map{|a| {requests: a[0], seconds: a[1]}}]
       end
 
-      def redis
-        settings.rate_limiter_redis_conn
-      end
-
-      def namespace
-        settings.rate_limiter_redis_namespace
-      end
-
-      def get_min_time_prefix(limits)
-        now    = Time.now.to_f
-        oldest = Time.now.to_f - limits.sort_by{|l| -l[:seconds]}.first[:seconds]
-
-        return now.to_s[0..((now/oldest).to_s.split(/^1\.|[1-9]+/)[1].length)].to_i.to_s
-      end
-
       def error_response(limiter, locals)
         if limiter.options.error_template
           render limiter.options.error_template, locals: locals
@@ -77,7 +60,6 @@ module Sinatra
           "Rate limit exceeded (#{locals[:requests]} requests in #{locals[:seconds]} seconds). Try again in #{locals[:try_again]} seconds."
         end
       end
-
 
     end
 
@@ -165,12 +147,26 @@ module Sinatra
       end
     end
 
+    def log_request
+      redis.setex(
+        [namespace, user_identifier, @bucket, Time.now.to_f.to_s].join('/'),
+        settings.rate_limiter_redis_expires,
+        nil)
+    end
+
     def redis
       settings.rate_limiter_redis_conn
     end
 
     def namespace
       settings.rate_limiter_redis_namespace
+    end
+
+    def get_min_time_prefix(limits)
+      now    = Time.now.to_f
+      oldest = Time.now.to_f - limits.sort_by{|l| -l[:seconds]}.first[:seconds]
+
+      return now.to_s[0..((now/oldest).to_s.split(/^1\.|[1-9]+/)[1].length)].to_i.to_s
     end
 
     def options=(options)
