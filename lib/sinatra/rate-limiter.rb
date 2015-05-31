@@ -25,8 +25,7 @@ module Sinatra
         end
 
         redis.setex([namespace,limiter.user_identifier,bucket,Time.now.to_f.to_s].join('/'),
-                             settings.rate_limiter_redis_expires,
-                             request.env['REQUEST_URI'])
+                             settings.rate_limiter_redis_expires, nil)
 
         limiter.rate_limit_headers.each{|h,v| response.headers[h] = v} if limiter.options.send_headers
       end
