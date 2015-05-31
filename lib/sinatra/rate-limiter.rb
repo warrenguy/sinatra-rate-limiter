@@ -17,17 +17,18 @@ module Sinatra
         limiter.request   = request
         limiter.options   = options
 
-        if error_locals = limits_exceeded?(limits, limiter)
-          rate_limit_headers(limits, bucket, limiter) if limiter.options.send_headers
+        if error_locals = limiter.limits_exceeded?
+          limiter.rate_limit_headers.each{|h,v| response.headers[h] = v} if limiter.options.send_headers
+
           response.headers['Retry-After'] = error_locals[:try_again]
-          halt limiter.options.error_code, error_response(error_locals, limiter)
+          halt limiter.options.error_code, error_response(limiter, error_locals)
         end
 
-        redis(limiter).setex([namespace(limiter),user_identifier(limiter),bucket,Time.now.to_f.to_s].join('/'),
+        redis.setex([namespace,limiter.user_identifier,bucket,Time.now.to_f.to_s].join('/'),
                              settings.rate_limiter_redis_expires,
                              request.env['REQUEST_URI'])
 
-        rate_limit_headers(limits, bucket, limiter) if limiter.options.send_headers
+        limiter.rate_limit_headers.each{|h,v| response.headers[h] = v} if limiter.options.send_headers
       end
 
       private
@@ -54,57 +55,12 @@ module Sinatra
                 limits.each_slice(2).map{|a| {requests: a[0], seconds: a[1]}}]
       end
 
-      def redis(limiter)
+      def redis
         settings.rate_limiter_redis_conn
       end
 
-      def namespace(limiter)
+      def namespace
         settings.rate_limiter_redis_namespace
-      end
-
-      def limit_remaining(limit, limiter)
-        limit[:requests] - limiter.history(limit[:seconds]).length
-      end
-
-      def limit_reset(limit, limiter)
-        limit[:seconds] - (Time.now.to_f - limiter.history(limit[:seconds]).first.to_f).to_i
-      end
-
-      def limits_exceeded?(limits, limiter)
-        exceeded = limits.select {|limit| limit_remaining(limit, limiter) < 1}.sort_by{|e| e[:seconds]}.last
-
-        if exceeded
-          try_again = limit_reset(exceeded, limiter)
-          return exceeded.merge({try_again: try_again.to_i})
-        end
-      end
-
-      def rate_limit_headers(limits, bucket, limiter)
-        header_prefix = 'X-Rate-Limit' + (bucket.eql?('default') ? '' : '-' + bucket)
-        limit_no = 0 if limits.length > 1
-        limits.each do |limit|
-          limit_no = limit_no + 1 if limit_no
-          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Limit']     = limit[:requests]
-          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Remaining'] = limit_remaining(limit, limiter)
-          response.headers[header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Reset']     = limit_reset(limit, limiter)
-        end
-      end
-
-      def error_response(locals, limiter)
-        if limiter.options.error_template
-          render limiter.options.error_template, locals: locals
-        else
-          content_type 'text/plain'
-          "Rate limit exceeded (#{locals[:requests]} requests in #{locals[:seconds]} seconds). Try again in #{locals[:try_again]} seconds."
-        end
-      end
-
-      def user_identifier(limiter)
-        if limiter.options.identifier.class == Proc
-          return limiter.options.identifier.call(request)
-        else
-          return request.ip
-        end
       end
 
       def get_min_time_prefix(limits)
@@ -113,6 +69,16 @@ module Sinatra
 
         return now.to_s[0..((now/oldest).to_s.split(/^1\.|[1-9]+/)[1].length)].to_i.to_s
       end
+
+      def error_response(limiter, locals)
+        if limiter.options.error_template
+          render limiter.options.error_template, locals: locals
+        else
+          content_type 'text/plain'
+          "Rate limit exceeded (#{locals[:requests]} requests in #{locals[:seconds]} seconds). Try again in #{locals[:try_again]} seconds."
+        end
+      end
+
 
     end
 
@@ -137,8 +103,6 @@ module Sinatra
   end
 
   class RateLimit
-    attr_reader :history, :options
-
     def initialize(bucket, limits)
       @bucket        = bucket
       @limits        = limits
@@ -155,10 +119,58 @@ module Sinatra
       if @history
         @history
       else
-        @history = redis(self).
-          keys("#{[namespace(self),user_identifier(self),@bucket].join('/')}/#{@time_prefix}*").
+        @history = redis.
+          keys("#{[namespace,user_identifier,@bucket].join('/')}/#{@time_prefix}*").
           map{|k| k.split('/')[3].to_f}
       end
+    end
+
+    def user_identifier
+      if options.identifier.class == Proc
+        return options.identifier.call(request)
+      else
+        return request.ip
+      end
+    end
+
+    def rate_limit_headers
+      headers = []
+
+      header_prefix = 'X-Rate-Limit' + (@bucket.eql?('default') ? '' : '-' + @bucket)
+      limit_no = 0 if @limits.length > 1
+      @limits.each do |limit|
+        limit_no = limit_no + 1 if limit_no
+        headers << [header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Limit',     limit[:requests]]
+        headers << [header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Remaining', limit_remaining(limit)]
+        headers << [header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Reset',     limit_reset(limit)]
+      end
+
+      return headers
+    end
+
+    def limit_remaining(limit)
+      limit[:requests] - history(limit[:seconds]).length
+    end
+
+    def limit_reset(limit)
+      limit[:seconds] - (Time.now.to_f - history(limit[:seconds]).first.to_f).to_i
+    end
+
+    def limits_exceeded?
+      exceeded = @limits.select {|limit| limit_remaining(limit) < 1}.sort_by{|e| e[:seconds]}.last
+
+      if exceeded
+        try_again = limit_reset(exceeded)
+        return exceeded.merge({try_again: try_again.to_i})
+      end
+    end
+
+    def redis
+      settings.rate_limiter_redis_conn
+    end
+
+    def namespace
+      settings.rate_limiter_redis_namespace
     end
 
     def options=(options)
