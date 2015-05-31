@@ -79,6 +79,7 @@ you must specify limits with each call of `rate_limit`
      error_code:     429,
      error_template: nil,
      send_headers:   true,
+     header_prefix:  'Rate-Limit',
      identifier:     Proc.new{ |request| request.ip }
    }
    ```
@@ -129,9 +130,27 @@ provided (all Integers):
 
 ##### `send_headers` (Boolean)
 
-Whether or not to send `X-RateLimit-` headers to the client with each
+Whether or not to send `Rate-Limit-*` headers to the client with each
 request. A `Retry-After` header is currently always sent when a rate
 limit is reached regardless of this setting.
+
+Three headers are sent per defined limit:
+
+ * `Rate-Limit-Limit` the number of requests allowed per period
+ * `Rate-Limit-Remaining` the number of requests left in the current period
+ * `Rate-Limit-Reset` the number of seconds remaining until the limit resets
+
+If a bucket name is defined, it will be included in the header in the format
+`Rate-Limit-Bucketname-*`. If more than one limit is defined, a number will
+also be added to differentiate them, e.g `Rate-Limit-1-*`, `Rate-Limit-2-*`,
+`Rate-Limit-Bucketname-1-*`, etc.
+
+##### `header_prefix` (String)
+
+Prefix for HTTP headers sent to client. Default is `Rate-Limit` (per 
+[RFC 6648](https://tools.ietf.org/html/rfc6648) deprecating the `X-` prefix)
+however some users may wish or need to send `X-Rate-Limit` or some other
+arbitrary header prefix instead.
 
 ##### `identifier` (Proc)
 

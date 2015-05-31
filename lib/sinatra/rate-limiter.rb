@@ -88,16 +88,17 @@ module Sinatra
       app.set :rate_limiter,                  false
       app.set :rate_limiter_environments,     [:production]
       app.set :rate_limiter_default_limits,   [10, 20]  # 10 requests per 20 seconds
-      app.set :rate_limiter_redis_conn,       Redis.new
-      app.set :rate_limiter_redis_namespace,  'rate_limit'
-      app.set :rate_limiter_redis_expires,    24*60*60 # This must be larger than longest limit time period
-
       app.set :rate_limiter_default_options, {
         error_code:     429,
         error_template: nil,
         send_headers:   true,
+        header_prefix:  'Rate-Limit',
         identifier:     Proc.new{ |request| request.ip }
       }
+
+      app.set :rate_limiter_redis_conn,       Redis.new
+      app.set :rate_limiter_redis_namespace,  'rate_limit'
+      app.set :rate_limiter_redis_expires,    24*60*60 # This must be larger than longest limit time period
     end
 
   end
@@ -136,7 +137,7 @@ module Sinatra
     def rate_limit_headers
       headers = []
 
-      header_prefix = 'X-Rate-Limit' + (@bucket.eql?('default') ? '' : '-' + @bucket)
+      header_prefix = options.header_prefix + (@bucket.eql?('default') ? '' : '-' + @bucket)
       limit_no = 0 if @limits.length > 1
       @limits.each do |limit|
         limit_no = limit_no + 1 if limit_no
