@@ -56,7 +56,7 @@ module Sinatra
           when :header_prefix
             raise ArgumentError, 'header_prefix must be a String' if value.class != String
           when :identifier
-            raise ArgumentError, 'identifier must be a Proc' if value.class != Proc
+            raise ArgumentError, 'identifier must be a Proc or String' if value.class != (Proc or String)
           else
             raise ArgumentError, "Invalid option #{option}"
           end
@@ -111,7 +111,7 @@ module Sinatra
       end
 
       def identifier
-        @identifier ||= @options.identifier.call(request)
+        @identifier ||= (@options.identifier.class == Proc ? @options.identifier.call(request) : @options.identifier)
       end
 
       def history(seconds=0)
@@ -138,7 +138,7 @@ module Sinatra
       end
 
       def limit_reset(limit)
-        limit[:seconds] - (Time.now.to_f - history(limit[:seconds]).first.to_f).to_i
+        limit[:seconds] - (Time.now.to_f - history(limit[:seconds]).min.to_f).to_i
       end
 
       def limits_exceeded?
