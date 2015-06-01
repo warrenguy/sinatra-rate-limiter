@@ -56,7 +56,7 @@ module Sinatra
           when :header_prefix
             raise ArgumentError, 'header_prefix must be a String' if value.class != String
           when :identifier
-            raise ArgumentError, 'identifier must be a Proc or nil' if (!value.nil? and value.class != Proc)
+            raise ArgumentError, 'identifier must be a Proc' if value.class != Proc
           else
             raise ArgumentError, "Invalid option #{option}"
           end
@@ -96,99 +96,91 @@ module Sinatra
       end
     end
 
-  end
+    class RateLimit
+      attr_accessor :settings, :request, :options
 
-  class RateLimit
-    attr_accessor :settings, :request, :options
-
-    def initialize(bucket, limits)
-      @bucket        = bucket
-      @limits        = limits
-      @time_prefix   = get_min_time_prefix(@limits)
-    end
-
-    def options=(options)
-      options = settings.rate_limiter_default_options.merge(options)
-      @options = Struct.new(*options.keys).new(*options.values)
-    end
-
-    def history(seconds=0)
-      redis_history.select{|t| seconds.eql?(0) ? true : t > (Time.now.to_f - seconds)}
-    end
-
-    def headers
-      headers = []
-
-      header_prefix = @options.header_prefix + (@bucket.eql?('default') ? '' : '-' + @bucket)
-      limit_no = 0 if @limits.length > 1
-      @limits.each do |limit|
-        limit_no = limit_no + 1 if limit_no
-        headers << [header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Limit',     limit[:requests]]
-        headers << [header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Remaining', limit_remaining(limit)]
-        headers << [header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Reset',     limit_reset(limit)]
+      def initialize(bucket, limits)
+        @bucket      = bucket
+        @limits      = limits
+        @time_prefix = get_min_time_prefix(@limits)
       end
 
-      return headers
-    end
+      def options=(options)
+        options = settings.rate_limiter_default_options.merge(options)
+        @options = Struct.new(*options.keys).new(*options.values)
+      end
 
-   def limit_remaining(limit)
-      limit[:requests] - history(limit[:seconds]).length
-    end
+      def identifier
+        @identifier ||= @options.identifier.call(request)
+      end
 
-    def limit_reset(limit)
-      limit[:seconds] - (Time.now.to_f - history(limit[:seconds]).first.to_f).to_i
-    end
+      def history(seconds=0)
+        redis_history.select{|t| seconds.eql?(0) ? true : t > (Time.now.to_f - seconds)}
+      end
 
-    def limits_exceeded?
-      exceeded = @limits.select {|limit| limit_remaining(limit) < 1}.sort_by{|e| e[:seconds]}.last
+      def headers
+        headers = []
 
-      if exceeded
-        try_again = limit_reset(exceeded)
-        return exceeded.merge({try_again: try_again.to_i, bucket: @bucket})
+        header_prefix = @options.header_prefix + (@bucket.eql?('default') ? '' : '-' + @bucket)
+        limit_no = 0 if @limits.length > 1
+        @limits.each do |limit|
+          limit_no = limit_no + 1 if limit_no
+          headers << [header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Limit',     limit[:requests]]
+          headers << [header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Remaining', limit_remaining(limit)]
+          headers << [header_prefix + (limit_no ? "-#{limit_no}" : '') + '-Reset',     limit_reset(limit)]
+        end
+
+        return headers
+      end
+
+      def limit_remaining(limit)
+        limit[:requests] - history(limit[:seconds]).length
+      end
+
+      def limit_reset(limit)
+        limit[:seconds] - (Time.now.to_f - history(limit[:seconds]).first.to_f).to_i
+      end
+
+      def limits_exceeded?
+        exceeded = @limits.select {|limit| limit_remaining(limit) < 1}.sort_by{|e| e[:seconds]}.last
+
+        if exceeded
+          try_again = limit_reset(exceeded)
+          return exceeded.merge({try_again: try_again.to_i, bucket: @bucket})
+        end
+      end
+
+      def log_request
+        redis.setex(
+          [namespace, identifier, @bucket, Time.now.to_f.to_s].join('/'),
+          @settings.rate_limiter_redis_expires,
+          nil)
+      end
+
+      private
+
+      def redis_history
+        @history ||= redis.
+          keys("#{[namespace,identifier,@bucket].join('/')}/#{@time_prefix}*").
+          map{|k| k.split('/')[3].to_f}
+      end
+
+      def redis
+        @settings.rate_limiter_redis_conn
+      end
+
+      def namespace
+        @settings.rate_limiter_redis_namespace
+      end
+
+      def get_min_time_prefix(limits)
+        now    = Time.now.to_f
+        oldest = Time.now.to_f - limits.sort_by{|l| -l[:seconds]}.first[:seconds]
+
+        return now.to_s[0..((now/oldest).to_s.split(/^1\.|[1-9]+/)[1].length)].to_i.to_s
       end
     end
 
-    def log_request
-      redis.setex(
-        [namespace, user_identifier, @bucket, Time.now.to_f.to_s].join('/'),
-        @settings.rate_limiter_redis_expires,
-        nil)
-    end
-
-    private
-
-    def redis_history
-      if @history
-        @history
-      else
-        @history = redis.
-          keys("#{[namespace,user_identifier,@bucket].join('/')}/#{@time_prefix}*").
-        map{|k| k.split('/')[3].to_f}
-      end
-    end
-
-    def user_identifier
-      if @options.identifier.class == Proc
-        return @options.identifier.call(request)
-      else
-        return request.ip
-      end
-    end
-
-    def redis
-      @settings.rate_limiter_redis_conn
-    end
-
-    def namespace
-      @settings.rate_limiter_redis_namespace
-    end
-
-    def get_min_time_prefix(limits)
-      now    = Time.now.to_f
-      oldest = Time.now.to_f - limits.sort_by{|l| -l[:seconds]}.first[:seconds]
-
-      return now.to_s[0..((now/oldest).to_s.split(/^1\.|[1-9]+/)[1].length)].to_i.to_s
-    end
   end
 
   register RateLimiter

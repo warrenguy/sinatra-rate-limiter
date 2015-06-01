@@ -52,7 +52,7 @@ Use `rate_limit` in the pipeline of any route (i.e. in the route itself, or
 in a `before` filter, or in a Padrino controller, etc. `rate_limit` takes
 zero to infinite parameters, with the syntax:
 
-  ```
+  ```ruby
   rate_limit [BucketName], [[<Requests>, <Seconds>], ...], [[<Key>: <Value>], ...]
   ```
 
@@ -67,11 +67,10 @@ See the _Examples_ section below for usage examples.
 
 When a rate limit is exceeded, the exception `Sinatra::RateLimiter::Exceeded`
 is thrown. By default, this sends an response code `429` with a simple plain
-text error message. You can use Sinatra's error handling to customise this.
+text error message. You can use Sinatra's error handling to customise this,
+for example to provide a JSON response with status code 400:
 
-E.g.:
-
-  ```
+  ```ruby
   error Sinatra::RateLimiter::Exceeded do
     status 400
     content_type :json
