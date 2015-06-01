@@ -82,11 +82,12 @@ E.g.:
 
 As well as the default error message being available in
 `env['sinatra.error'].message`, `the env['sinatra.error.rate_limiter']`
-object contains three values for the exceeded limit:
+object contains four values for the exceeded limit:
 
  * `.requests` Integer of the number of requests allowed
  * `.seconds` Integer of the number of seconds the request limit applies to
  * `.try_again` Integer the number of seconds until the limit resets
+ * `.bucket` Name of the triggering bucket
 
 ## Configuration
 
