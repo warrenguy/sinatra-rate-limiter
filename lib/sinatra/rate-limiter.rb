@@ -5,6 +5,9 @@ module Sinatra
 
   module RateLimiter
 
+    class Exceeded < StandardError
+    end
+
     module Helpers
 
       def rate_limit(*args)
@@ -18,22 +21,27 @@ module Sinatra
         limiter.options   = options
 
         if error_locals = limiter.limits_exceeded?
-          limiter.rate_limit_headers.each{|h,v| response.headers[h] = v} if limiter.options.send_headers
+          if limiter.options.send_headers
+            limiter.headers.each{|h,v| response.headers[h] = v}
+            response.headers['Retry-After'] = error_locals[:try_again]
+          end
 
-          response.headers['Retry-After'] = error_locals[:try_again]
-          halt limiter.options.error_code, error_response(limiter, error_locals)
+          request.env['sinatra.error.rate_limiter'] = Struct.new(*error_locals.keys).new(*error_locals.values)
+          raise Sinatra::RateLimiter::Exceeded, "Rate limit exceeded:" +
+            " #{error_locals[:requests]} requests in #{error_locals[:seconds]} seconds." +
+            " Try again in #{error_locals[:try_again]} seconds."
         end
 
         limiter.log_request
-        limiter.rate_limit_headers.each{|h,v| response.headers[h] = v} if limiter.options.send_headers
+        limiter.headers.each{|h,v| response.headers[h] = v} if limiter.options.send_headers
       end
 
       private
 
       def parse_args(args)
-        bucket    = (args.first.class == String) ? args.shift : 'default'
-        options   = (args.last.class == Hash)    ? args.pop   : {}
-        limits    = (args.size < 1) ? settings.rate_limiter_default_limits : args
+        bucket  = (args.first.class == String) ? args.shift : 'default'
+        options = (args.last.class == Hash)    ? args.pop   : {}
+        limits  = (args.size < 1) ? settings.rate_limiter_default_limits : args
 
         if (limits.size < 1)
           raise ArgumentError, 'No explicit or default limits values provided.'
@@ -43,22 +51,24 @@ module Sinatra
           raise ArgumentError, 'Wrong number of Fixnum parameters supplied.'
         elsif !(bucket =~ /^[a-zA-Z0-9\-]*$/)
           raise ArgumentError, 'Limit name must be a String containing only a-z, A-Z, 0-9, and -.'
-        elsif (omap = (options.keys.map{|o| settings.rate_limiter_default_options.keys.include?(o)})).include?(false)
-          raise ArgumentError, "Invalid option '#{options.keys[omap.index(false)]}'."
+        end
+
+        options.to_a.each do |option, value|
+          case option
+          when :send_headers
+            raise ArgumentError, 'send_headers must be true or false' if !(value == (true or false))
+          when :header_prefix
+            raise ArgumentError, 'header_prefix must be a String' if value.class != String
+          when :identifier
+            raise ArgumentError, 'identifier must be a Proc or nil' if (!value.nil? and value.class != Proc)
+          else
+            raise ArgumentError, "Invalid option #{option}"
+          end
         end
 
         return [bucket,
                 options,
                 limits.each_slice(2).map{|a| {requests: a[0], seconds: a[1]}}]
-      end
-
-      def error_response(limiter, locals)
-        if limiter.options.error_template
-          render limiter.options.error_template, locals: locals
-        else
-          content_type 'text/plain'
-          "Rate limit exceeded (#{locals[:requests]} requests in #{locals[:seconds]} seconds). Try again in #{locals[:try_again]} seconds."
-        end
       end
 
     end
@@ -70,8 +80,6 @@ module Sinatra
       app.set :rate_limiter_environments,     [:production]
       app.set :rate_limiter_default_limits,   [10, 20]  # 10 requests per 20 seconds
       app.set :rate_limiter_default_options, {
-        error_code:     429,
-        error_template: nil,
         send_headers:   true,
         header_prefix:  'Rate-Limit',
         identifier:     Proc.new{ |request| request.ip }
@@ -80,45 +88,38 @@ module Sinatra
       app.set :rate_limiter_redis_conn,       Redis.new
       app.set :rate_limiter_redis_namespace,  'rate_limit'
       app.set :rate_limiter_redis_expires,    24*60*60 # This must be larger than longest limit time period
+
+      app.error Sinatra::RateLimiter::Exceeded do
+        status 429
+        content_type 'text/plain'
+        env['sinatra.error'].message
+      end
     end
 
   end
 
   class RateLimit
+    attr_accessor :settings, :request, :options
+
     def initialize(bucket, limits)
       @bucket        = bucket
       @limits        = limits
       @time_prefix   = get_min_time_prefix(@limits)
     end
 
-    include Sinatra::RateLimiter::Helpers
+    def options=(options)
+      options = settings.rate_limiter_default_options.merge(options)
+      @options = Struct.new(*options.keys).new(*options.values)
+    end
 
     def history(seconds=0)
       redis_history.select{|t| seconds.eql?(0) ? true : t > (Time.now.to_f - seconds)}
     end
 
-    def redis_history
-      if @history
-        @history
-      else
-        @history = redis.
-          keys("#{[namespace,user_identifier,@bucket].join('/')}/#{@time_prefix}*").
-          map{|k| k.split('/')[3].to_f}
-      end
-    end
-
-    def user_identifier
-      if options.identifier.class == Proc
-        return options.identifier.call(request)
-      else
-        return request.ip
-      end
-    end
-
-    def rate_limit_headers
+    def headers
       headers = []
 
-      header_prefix = options.header_prefix + (@bucket.eql?('default') ? '' : '-' + @bucket)
+      header_prefix = @options.header_prefix + (@bucket.eql?('default') ? '' : '-' + @bucket)
       limit_no = 0 if @limits.length > 1
       @limits.each do |limit|
         limit_no = limit_no + 1 if limit_no
@@ -130,7 +131,7 @@ module Sinatra
       return headers
     end
 
-    def limit_remaining(limit)
+   def limit_remaining(limit)
       limit[:requests] - history(limit[:seconds]).length
     end
 
@@ -150,16 +151,36 @@ module Sinatra
     def log_request
       redis.setex(
         [namespace, user_identifier, @bucket, Time.now.to_f.to_s].join('/'),
-        settings.rate_limiter_redis_expires,
+        @settings.rate_limiter_redis_expires,
         nil)
     end
 
+    private
+
+    def redis_history
+      if @history
+        @history
+      else
+        @history = redis.
+          keys("#{[namespace,user_identifier,@bucket].join('/')}/#{@time_prefix}*").
+        map{|k| k.split('/')[3].to_f}
+      end
+    end
+
+    def user_identifier
+      if @options.identifier.class == Proc
+        return @options.identifier.call(request)
+      else
+        return request.ip
+      end
+    end
+
     def redis
-      settings.rate_limiter_redis_conn
+      @settings.rate_limiter_redis_conn
     end
 
     def namespace
-      settings.rate_limiter_redis_namespace
+      @settings.rate_limiter_redis_namespace
     end
 
     def get_min_time_prefix(limits)
@@ -167,28 +188,6 @@ module Sinatra
       oldest = Time.now.to_f - limits.sort_by{|l| -l[:seconds]}.first[:seconds]
 
       return now.to_s[0..((now/oldest).to_s.split(/^1\.|[1-9]+/)[1].length)].to_i.to_s
-    end
-
-    def options=(options)
-      options = settings.rate_limiter_default_options.merge(options)
-      @options = Struct.new(*options.keys).new(*options.values)
-    end
-    def options
-      @options
-    end
-
-    def settings=(settings)
-      @settings = settings
-    end
-    def settings
-      @settings
-    end
-
-    def request=(request)
-      @request = request
-    end
-    def request
-      @request
     end
   end
 

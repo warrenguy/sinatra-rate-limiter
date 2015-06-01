@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name        = 'sinatra-rate-limiter'
-  s.version     = '0.3.2'
+  s.version     = '0.4.0'
   s.licenses    = ['MIT']
   s.summary     = 'A redis based rate limiter for Sinatra'
   s.description = 'A redis based rate limiter for Sinatra'

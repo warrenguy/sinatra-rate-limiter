@@ -46,6 +46,8 @@ different requests using the same bucket.
 
 ## Usage
 
+### Defining rate limits
+
 Use `rate_limit` in the pipeline of any route (i.e. in the route itself, or
 in a `before` filter, or in a Padrino controller, etc. `rate_limit` takes
 zero to infinite parameters, with the syntax:
@@ -60,6 +62,30 @@ requests per seconds are allowed for this route/path. Finally overrides for
 the globally defined default options can be provided.
 
 See the _Examples_ section below for usage examples.
+
+### Error handling
+
+When a rate limit is exceeded, the exception `Sinatra::RateLimiter::Exceeded`
+is thrown. By default, this sends an response code `429` with an informative
+plain text error message. You can use Sinatra's error handling to customise
+this. E.g.:
+
+  ```
+  error Sinatra::RateLimiter::Exceeded do
+    status 400
+    content_type :json
+
+    {error: { message: env['sinatra.error'].message } }.to_json
+  end
+  ```
+
+As well as the default error message being available in
+`env['sinatra.error'].message`, `the env['sinatra.error.rate_limiter']`
+object contains three values for the exceeded limit:
+
+ * `.requests` Integer of the number of requests allowed
+ * `.seconds` Integer of the number of seconds the request limit applies to
+ * `.try_again` Integer the number of seconds until the limit resets
 
 ## Configuration
 
@@ -76,8 +102,6 @@ you must specify limits with each call of `rate_limit`
    set :rate_limiter_redis_expires,    24*60*60
 
    set :rate_limiter_default_options, {
-     error_code:     429,
-     error_template: nil,
      send_headers:   true,
      header_prefix:  'Rate-Limit',
      identifier:     Proc.new{ |request| request.ip }
@@ -111,28 +135,10 @@ limiter's longest 'seconds' parameter.
 
 Default options provided to each call of `rate_limit`
 
-##### `error_code` (Integer)
-
-The HTTP error code to send to the client when a rate limit is reached.
-Defaults to `429` per [RFC 6585](http://tools.ietf.org/html/rfc6585) but
-you may have your own reasons for wanting to use a different code (like 400
-or 503).
-
-##### `error_template` (String)
-
-Defines a template to render when a rate limit is reached (e.g. a nice error
-page or a machine friendly JSON response). Three local variables are
-provided (all Integers):
-
- * `requests`: The number of requests that triggered the rate limit.
- * `seconds`: The rate limit period.
- * `try_again`: In how many seconds the client should try again.
-
 ##### `send_headers` (Boolean)
 
 Whether or not to send `Rate-Limit-*` headers to the client with each
-request. A `Retry-After` header is currently always sent when a rate
-limit is reached regardless of this setting.
+request.
 
 Three headers are sent per defined limit:
 
@@ -144,6 +150,9 @@ If a bucket name is defined, it will be included in the header in the format
 `Rate-Limit-Bucketname-*`. If more than one limit is defined, a number will
 also be added to differentiate them, e.g `Rate-Limit-1-*`, `Rate-Limit-2-*`,
 `Rate-Limit-Bucketname-1-*`, etc.
+
+Additionally, a `Retry-After` header is sent containing the number of
+seconds remaining until the limit resets.
 
 ##### `header_prefix` (String)
 
