@@ -26,9 +26,7 @@ module Sinatra
           response.headers['Retry-After'] = error_locals[:try_again] if limiter.options.send_headers
 
           request.env['sinatra.error.rate_limiter'] = Struct.new(*error_locals.keys).new(*error_locals.values)
-          raise Sinatra::RateLimiter::Exceeded, "Rate limit exceeded:" +
-            " #{error_locals[:requests]} requests in #{error_locals[:seconds]} seconds." +
-            " Try again in #{error_locals[:try_again]} seconds."
+          raise Sinatra::RateLimiter::Exceeded, "#{bucket.eql?('default') ? 'R' : bucket + ' r'}ate limit exceeded"
         end
 
         limiter.log_request
@@ -90,7 +88,11 @@ module Sinatra
       app.error Sinatra::RateLimiter::Exceeded do
         status 429
         content_type 'text/plain'
-        env['sinatra.error'].message
+
+        "#{env['sinatra.error.rate_limiter'].bucket.eql?('default') ? 'R' : env['sinatra.error.rate_limiter'].bucket + ' R'}" +
+          "ate limit exceeded: #{env['sinatra.error.rate_limiter'].requests} requests" +
+          " in #{env['sinatra.error.rate_limiter'].seconds} seconds." +
+          " Try again in #{env['sinatra.error.rate_limiter'].try_again} seconds."
       end
     end
 
@@ -142,7 +144,7 @@ module Sinatra
 
       if exceeded
         try_again = limit_reset(exceeded)
-        return exceeded.merge({try_again: try_again.to_i})
+        return exceeded.merge({try_again: try_again.to_i, bucket: @bucket})
       end
     end
 

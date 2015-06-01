@@ -66,9 +66,10 @@ See the _Examples_ section below for usage examples.
 ### Error handling
 
 When a rate limit is exceeded, the exception `Sinatra::RateLimiter::Exceeded`
-is thrown. By default, this sends an response code `429` with an informative
-plain text error message. You can use Sinatra's error handling to customise
-this. E.g.:
+is thrown. By default, this sends an response code `429` with a simple plain
+text error message. You can use Sinatra's error handling to customise this.
+
+E.g.:
 
   ```
   error Sinatra::RateLimiter::Exceeded do
