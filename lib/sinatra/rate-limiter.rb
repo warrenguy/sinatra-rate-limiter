@@ -20,11 +20,10 @@ module Sinatra
         limiter.request   = request
         limiter.options   = options
 
-        if error_locals = limiter.limits_exceeded?
-          if limiter.options.send_headers
-            limiter.headers.each{|h,v| response.headers[h] = v}
-            response.headers['Retry-After'] = error_locals[:try_again]
-          end
+        limiter.headers.each{|h,v| response.headers[h] = v} if limiter.options.send_headers
+
+        if (error_locals = limiter.limits_exceeded?)
+          response.headers['Retry-After'] = error_locals[:try_again] if limiter.options.send_headers
 
           request.env['sinatra.error.rate_limiter'] = Struct.new(*error_locals.keys).new(*error_locals.values)
           raise Sinatra::RateLimiter::Exceeded, "Rate limit exceeded:" +
@@ -33,7 +32,6 @@ module Sinatra
         end
 
         limiter.log_request
-        limiter.headers.each{|h,v| response.headers[h] = v} if limiter.options.send_headers
       end
 
       private
